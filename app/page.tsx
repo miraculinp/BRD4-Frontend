@@ -218,19 +218,38 @@ export default function Home() {
     }
   }
 
-  async function explain(result: PredictionResult) {
-    setError(""); setExplainTarget(result); setExplanation(null); setExplainBusy(true);
+  async function loadExplanation(result: PredictionResult, model: "ExtraTreesRegressor" | "CatBoostRegressor") {
+    setError(""); setExplainBusy(true);
     try {
       const res = await fetch(`${apiBase()}/api/explain/smiles`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ smiles: result.canonical_smiles }), signal: AbortSignal.timeout(120000),
+        body: JSON.stringify({ smiles: result.canonical_smiles, model }), signal: AbortSignal.timeout(180000),
       });
       if (!res.ok) throw new Error(await readError(res));
-      setExplanation(await res.json() as ExplanationResponse);
+      const data = await res.json() as ExplanationResponse;
+      setExplanation((previous) => previous?.canonical_smiles === data.canonical_smiles
+        ? { ...previous, models: { ...previous.models, ...data.models } }
+        : data);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Could not create the local explanation.");
-      setExplainTarget(null);
-    } finally { setExplainBusy(false); }
+    } finally {
+      setExplainBusy(false);
+    }
+  }
+
+  async function explain(result: PredictionResult) {
+    const firstModel = "ExtraTreesRegressor" as const;
+    setExplainTarget(result);
+    setExplanation(null);
+    setExplainModel(firstModel);
+    await loadExplanation(result, firstModel);
+  }
+
+  function selectExplanationModel(model: "ExtraTreesRegressor" | "CatBoostRegressor") {
+    setExplainModel(model);
+    if (explainTarget && !explanation?.models[model] && !explainBusy) {
+      void loadExplanation(explainTarget, model);
+    }
   }
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -331,7 +350,7 @@ export default function Home() {
           <div className="modal-header"><div><span className="step-label">LOCAL MODEL EXPLANATION</span><h2 id="explain-title">{explainTarget.input_name}</h2><code>{explainTarget.canonical_smiles}</code></div><button className="close-button" onClick={() => { setExplainTarget(null); setExplanation(null); }} aria-label="Close explanation">×</button></div>
           {explainBusy && <div className="explain-loading"><span className="spinner dark" />Calculating TreeSHAP contributions and Morgan environments…</div>}
           {explanation && <>
-            <div className="explain-model-tabs">{(["ExtraTreesRegressor", "CatBoostRegressor"] as const).map((model) => <button type="button" key={model} className={explainModel === model ? "active" : ""} onClick={() => setExplainModel(model)}>{MODEL_LABELS[model]}</button>)}</div>
+            <div className="explain-model-tabs">{(["ExtraTreesRegressor", "CatBoostRegressor"] as const).map((model) => <button type="button" key={model} className={explainModel === model ? "active" : ""} disabled={explainBusy} onClick={() => selectExplanationModel(model)}>{MODEL_LABELS[model]}</button>)}</div>
             {activeExplanation && <>
               <div className="explain-stat-row"><div><span>SHAP baseline</span><b>{fmt(activeExplanation.base_value)}</b></div><div><span>Model prediction</span><b>{fmt(activeExplanation.prediction)}</b></div><div><span>Additivity check</span><b>{fmt(activeExplanation.additivity_error, 5)}</b></div></div>
               <div className="explain-grid">
