@@ -154,7 +154,7 @@ export default function Home() {
     <main className="page-shell">
       <header className="topbar">
         <a className="brand" href="#top" aria-label="BRD4 Predictor home"><span className="brand-mark">B4</span><span>BRD4 <b>Predictor</b></span></a>
-        <div className="topbar-right"><span className="live-dot" /> Ligand-based QSAR <span className="topbar-divider" /> Stage 05 fixed features</div>
+        <div className="topbar-right"><span className="live-dot" /> Ligand-based QSAR</div>
       </header>
 
       <section className="hero" id="top">
