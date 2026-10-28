@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
 type ModelName = "ExtraTreesRegressor" | "CatBoostRegressor" | "SVR";
@@ -22,19 +22,6 @@ type PredictionResult = {
 };
 type Failure = { input_name: string; record?: number | null; reason: string; features?: string[] };
 type PredictionResponse = { results: PredictionResult[]; failures: Failure[]; n_parsed: number; n_scored: number };
-type ShapFeature = { feature: string; value: number; shap_value: number; direction: string };
-type MorganLegend = { feature: string; shap_value: number; direction: string; color: string; atom_indices: number[]; bond_indices: number[] };
-type ModelExplanation = {
-  base_value: number;
-  prediction: number;
-  shap_sum: number;
-  additivity_error: number;
-  features: ShapFeature[];
-  top_features: ShapFeature[];
-  morgan_svg: string | null;
-  morgan_legend: MorganLegend[];
-};
-type ExplanationResponse = { canonical_smiles: string; models: Partial<Record<Exclude<ModelName, "SVR">, ModelExplanation>> };
 type InputMode = "smiles" | "file";
 
 const MODEL_LABELS: Record<ModelName, string> = {
@@ -107,62 +94,6 @@ function fmt(value: number | undefined, digits = 3): string {
   return Number.isFinite(value) ? Number(value).toFixed(digits) : "—";
 }
 
-function Waterfall({ explanation }: { explanation: ModelExplanation }) {
-  const bars = useMemo(() => {
-    const ranked = [...explanation.features].sort((a, b) => Math.abs(b.shap_value) - Math.abs(a.shap_value));
-    const shown = ranked.slice(0, 12);
-    const residual = ranked.slice(12).reduce((sum, row) => sum + row.shap_value, 0);
-    const items = [...shown];
-    if (ranked.length > shown.length) items.push({ feature: "Other features", value: 0, shap_value: residual, direction: residual >= 0 ? "increases" : "decreases" });
-    let cursor = explanation.base_value;
-    return items.map((item) => {
-      const start = cursor;
-      cursor += item.shap_value;
-      return { ...item, start, end: cursor };
-    });
-  }, [explanation]);
-
-  const width = 820;
-  const labelW = 190;
-  const plotW = 535;
-  const rowH = 32;
-  const height = 54 + bars.length * rowH;
-  const allVals = [explanation.base_value, explanation.prediction, ...bars.flatMap((b) => [b.start, b.end])];
-  let min = Math.min(...allVals), max = Math.max(...allVals);
-  if (max - min < 0.02) { min -= 0.05; max += 0.05; }
-  const x = (v: number) => labelW + ((v - min) / (max - min)) * plotW;
-
-  return (
-    <div className="waterfall-wrap">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Local SHAP waterfall">
-        <line x1={x(explanation.base_value)} x2={x(explanation.base_value)} y1="25" y2={height - 12} className="wf-base" />
-        <text x={labelW} y="16" className="wf-axis">Base {fmt(explanation.base_value)}</text>
-        <text x={labelW + plotW} y="16" textAnchor="end" className="wf-axis">Prediction {fmt(explanation.prediction)}</text>
-        {bars.map((bar, index) => {
-          const y = 30 + index * rowH;
-          const left = Math.min(x(bar.start), x(bar.end));
-          const barWidth = Math.max(2, Math.abs(x(bar.end) - x(bar.start)));
-          const positive = bar.shap_value >= 0;
-          return (
-            <g key={`${bar.feature}-${index}`}>
-              <text x={labelW - 10} y={y + 15} textAnchor="end" className="wf-feature">
-                <title>{bar.feature}</title>
-                {bar.feature.length > 27 ? `${bar.feature.slice(0, 25)}…` : bar.feature}
-              </text>
-              <rect x={left} y={y + 3} width={barWidth} height="18" rx="4" fill={positive ? "#0b8a75" : "#d95b52"} />
-              <text x={labelW + plotW + 9} y={y + 16} className="wf-value">{bar.shap_value >= 0 ? "+" : ""}{fmt(bar.shap_value)}</text>
-            </g>
-          );
-        })}
-        <line x1={labelW} x2={labelW + plotW} y1={height - 7} y2={height - 7} className="wf-axis-line" />
-        <text x={labelW} y={height - 1} className="wf-axis">{fmt(min)}</text>
-        <text x={labelW + plotW} y={height - 1} textAnchor="end" className="wf-axis">{fmt(max)}</text>
-      </svg>
-      <div className="waterfall-key"><span><i className="positive-dot" /> raises predicted pIC₅₀</span><span><i className="negative-dot" /> lowers predicted pIC₅₀</span></div>
-    </div>
-  );
-}
-
 function DomainRow({ label, inside, value }: { label: string; inside: boolean; value: string }) {
   return (
     <div className="domain-row">
@@ -181,15 +112,11 @@ export default function Home() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState("");
-  const [explainTarget, setExplainTarget] = useState<PredictionResult | null>(null);
-  const [explanation, setExplanation] = useState<ExplanationResponse | null>(null);
-  const [explainModel, setExplainModel] = useState<"ExtraTreesRegressor" | "CatBoostRegressor">("ExtraTreesRegressor");
-  const [explainBusy, setExplainBusy] = useState(false);
   const [showFailures, setShowFailures] = useState(true);
 
   async function predict(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(""); setResponse(null); setExplanation(null);
+    setError(""); setResponse(null);
     if (!apiBase()) { setError("Set NEXT_PUBLIC_API_URL in the Vercel project environment variables."); return; }
     if (mode === "smiles" && !smilesText.trim()) { setError("Enter at least one SMILES string."); return; }
     if (mode === "file" && !file) { setError("Choose an SDF or MOL2 file first."); return; }
@@ -218,46 +145,10 @@ export default function Home() {
     }
   }
 
-  async function loadExplanation(result: PredictionResult, model: "ExtraTreesRegressor" | "CatBoostRegressor") {
-    setError(""); setExplainBusy(true);
-    try {
-      const res = await fetch(`${apiBase()}/api/explain/smiles`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ smiles: result.canonical_smiles, model }), signal: AbortSignal.timeout(180000),
-      });
-      if (!res.ok) throw new Error(await readError(res));
-      const data = await res.json() as ExplanationResponse;
-      setExplanation((previous) => previous?.canonical_smiles === data.canonical_smiles
-        ? { ...previous, models: { ...previous.models, ...data.models } }
-        : data);
-    } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Could not create the local explanation.");
-    } finally {
-      setExplainBusy(false);
-    }
-  }
-
-  async function explain(result: PredictionResult) {
-    const firstModel = "ExtraTreesRegressor" as const;
-    setExplainTarget(result);
-    setExplanation(null);
-    setExplainModel(firstModel);
-    await loadExplanation(result, firstModel);
-  }
-
-  function selectExplanationModel(model: "ExtraTreesRegressor" | "CatBoostRegressor") {
-    setExplainModel(model);
-    if (explainTarget && !explanation?.models[model] && !explainBusy) {
-      void loadExplanation(explainTarget, model);
-    }
-  }
-
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0] || null;
     setFile(selected);
   }
-
-  const activeExplanation = explanation?.models[explainModel];
 
   return (
     <main className="page-shell">
@@ -270,7 +161,7 @@ export default function Home() {
         <div className="hero-copy">
           <span className="eyebrow">BRD4 BROMODOMAIN · pIC₅₀ ESTIMATION</span>
           <h1>Explore a molecule’s<br /><em>predicted activity.</em></h1>
-          <p>Run three saved QSAR models, check how each molecule compares with the training chemistry, and inspect model explanations for tree models.</p>
+          <p>Run three saved QSAR models, compare their pIC₅₀ estimates, and check how each molecule compares with the training chemistry.</p>
           <div className="hero-tags"><span>ExtraTrees</span><span>CatBoost</span><span>SVR</span><span>3 applicability checks</span></div>
         </div>
         <div className="hero-side">
@@ -308,8 +199,8 @@ export default function Home() {
           <h3>Prediction is one part of the answer.</h3>
           <div className="guide-line"><span className="guide-number">1</span><p><b>Compare models.</b> View pIC₅₀ estimates separately; disagreement is a signal to inspect the molecule.</p></div>
           <div className="guide-line"><span className="guide-number">2</span><p><b>Check applicability.</b> See all three training-domain methods and their measured values.</p></div>
-          <div className="guide-line"><span className="guide-number">3</span><p><b>Explain on demand.</b> Local SHAP is available for ExtraTrees and CatBoost, not SVR.</p></div>
-          <div className="guide-caution"><strong>Interpret carefully</strong><span>SHAP values describe how the fitted model used features. They are not causal evidence of activity.</span></div>
+          <div className="guide-line"><span className="guide-number">3</span><p><b>Export results.</b> Download predictions, domain measurements, and record-level failures as a CSV.</p></div>
+          <div className="guide-caution"><strong>Interpret carefully</strong><span>Predicted pIC₅₀ values and domain flags are computational estimates, not experimental measurements.</span></div>
         </aside>
       </section>
 
@@ -337,35 +228,13 @@ export default function Home() {
               <div className="domain-grid">{values.map(([label, inside, value]) => <DomainRow key={label} label={label} inside={inside} value={value} />)}</div>
               <p className="ad-footnote">These are complementary screening rules, not a probability of prediction accuracy or a prediction interval.</p>
             </div>
-            <div className="molecule-actions"><span>Compare the three estimates and review domain flags before using the prediction.</span><button className="explain-button" type="button" onClick={() => explain(result)} disabled={explainBusy}>{explainBusy && explainTarget?.canonical_smiles === result.canonical_smiles ? "Calculating SHAP…" : "Explain with SHAP"} <span>↗</span></button></div>
+            <div className="molecule-actions"><span>Compare the three estimates and review domain flags before using the prediction.</span></div>
           </article>;
         })}
         {response.failures.length > 0 && <div className="failures-card"><button type="button" className="failure-toggle" onClick={() => setShowFailures((v) => !v)}><span><span className="warning-mark">!</span> {response.failures.length} record{response.failures.length === 1 ? "" : "s"} not scored</span><span>{showFailures ? "Hide −" : "Review +"}</span></button>
           {showFailures && <div className="failure-list">{response.failures.map((f, i) => <div className="failure-row" key={`${f.input_name}-${i}`}><b>{f.input_name}</b><span>{f.reason}</span></div>)}</div>}
         </div>}
       </section>}
-
-      {explainTarget && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) { setExplainTarget(null); setExplanation(null); } }}>
-        <section className="explain-modal" role="dialog" aria-modal="true" aria-labelledby="explain-title">
-          <div className="modal-header"><div><span className="step-label">LOCAL MODEL EXPLANATION</span><h2 id="explain-title">{explainTarget.input_name}</h2><code>{explainTarget.canonical_smiles}</code></div><button className="close-button" onClick={() => { setExplainTarget(null); setExplanation(null); }} aria-label="Close explanation">×</button></div>
-          {explainBusy && <div className="explain-loading"><span className="spinner dark" />Calculating TreeSHAP contributions and Morgan environments…</div>}
-          {explanation && <>
-            <div className="explain-model-tabs">{(["ExtraTreesRegressor", "CatBoostRegressor"] as const).map((model) => <button type="button" key={model} className={explainModel === model ? "active" : ""} disabled={explainBusy} onClick={() => selectExplanationModel(model)}>{MODEL_LABELS[model]}</button>)}</div>
-            {activeExplanation && <>
-              <div className="explain-stat-row"><div><span>SHAP baseline</span><b>{fmt(activeExplanation.base_value)}</b></div><div><span>Model prediction</span><b>{fmt(activeExplanation.prediction)}</b></div><div><span>Additivity check</span><b>{fmt(activeExplanation.additivity_error, 5)}</b></div></div>
-              <div className="explain-grid">
-                <div className="explain-panel"><div className="panel-title"><span className="step-label">CONTRIBUTION WATERFALL</span><h3>Feature contributions to pIC₅₀</h3><p>Positive contributions raise this model’s prediction; negative contributions lower it.</p></div><Waterfall explanation={activeExplanation} /></div>
-                <div className="explain-panel"><div className="panel-title"><span className="step-label">MORGAN ENVIRONMENTS</span><h3>Highlighted atom environments</h3><p>Color legend links mapped Morgan bits to their signed SHAP contribution.</p></div>
-                  {activeExplanation.morgan_svg ? <img className="molecule-svg" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(activeExplanation.morgan_svg)}`} alt="Molecule with Morgan atom environments highlighted" /> : <div className="empty-figure">No Morgan bit environment was selected for this explanation.</div>}
-                  <div className="morgan-legend">{activeExplanation.morgan_legend.map((item) => <div className="legend-item" key={item.feature}><i style={{ backgroundColor: item.color }} /><span><b>{item.feature}</b><small>{item.shap_value >= 0 ? "+" : ""}{fmt(item.shap_value)} pIC₅₀ · {item.direction}</small></span></div>)}</div>
-                </div>
-              </div>
-              <div className="top-features"><div className="panel-title"><span className="step-label">LARGEST LOCAL TERMS</span><h3>Feature-level contributions</h3></div><div className="feature-table"><div className="feature-table-head"><span>Feature</span><span>Value</span><span>SHAP (pIC₅₀)</span></div>{activeExplanation.top_features.map((f) => <div className="feature-table-row" key={f.feature}><span>{f.feature}</span><span>{fmt(f.value, 4)}</span><b className={f.shap_value >= 0 ? "shap-positive" : "shap-negative"}>{f.shap_value >= 0 ? "+" : ""}{fmt(f.shap_value, 4)}</b></div>)}</div></div>
-              <p className="shap-disclaimer">Model explanation only: these attributions describe the fitted model’s prediction, not causal molecular effects or protein contacts. SVR SHAP is not provided.</p>
-            </>}
-          </>}
-        </section>
-      </div>}
 
       <footer className="page-footer"><span>BRD4 QSAR Predictor</span><span>Ligand-based estimate · Review training-domain flags · No assay result is generated</span></footer>
     </main>

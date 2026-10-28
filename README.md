@@ -1,6 +1,6 @@
 # BRD4 Predictor frontend (Next.js)
 
-This is the Vercel half of the app. It accepts SMILES text or SDF/MOL2 files, shows all three pIC50 estimates and the three AD checks, supports CSV export, and requests local SHAP for ExtraTrees/CatBoost only when the user opens an explanation.
+This is the Vercel half of the app. It accepts SMILES text or SDF/MOL2 files, shows all three pIC50 estimates and the three AD checks, and supports CSV export.
 
 ## Run locally
 
