@@ -145,7 +145,8 @@ function Waterfall({ explanation }: { explanation: ModelExplanation }) {
           const positive = bar.shap_value >= 0;
           return (
             <g key={`${bar.feature}-${index}`}>
-              <text x={labelW - 10} y={y + 15} textAnchor="end" className="wf-feature" title={bar.feature}>
+              <text x={labelW - 10} y={y + 15} textAnchor="end" className="wf-feature">
+                <title>{bar.feature}</title>
                 {bar.feature.length > 27 ? `${bar.feature.slice(0, 25)}…` : bar.feature}
               </text>
               <rect x={left} y={y + 3} width={barWidth} height="18" rx="4" fill={positive ? "#0b8a75" : "#d95b52"} />
